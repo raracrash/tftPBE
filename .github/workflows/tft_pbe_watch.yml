@@ -1,1 +1,52 @@
+name: TFT PBE watch
 
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+jobs:
+  check_page:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check TestFlight page and notify
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          import sys
+          import urllib.request
+
+          TESTFLIGHT_URL = "https://testflight.apple.com/join/q79npPHz"
+          FULL_MESSAGE = "This beta is full"
+          NTFY_TOPIC = os.environ["NTFY_TOPIC"]
+
+
+          def fetch_page_text(url):
+              request_obj = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              with urllib.request.urlopen(request_obj, timeout=30) as response_obj:
+                  return response_obj.read().decode("utf-8", errors="replace")
+
+
+          def send_notification(title_text, message_text):
+              request_obj = urllib.request.Request(
+                  f"https://ntfy.sh/{NTFY_TOPIC}",
+                  data=message_text.encode("utf-8"),
+                  headers={"Title": title_text, "Priority": "urgent", "Click": TESTFLIGHT_URL},
+              )
+              urllib.request.urlopen(request_obj, timeout=30)
+
+
+          page_text = fetch_page_text(TESTFLIGHT_URL)
+
+          if "TFT" not in page_text:
+              print("unexpected page, skip")
+              sys.exit(0)
+
+          if FULL_MESSAGE in page_text:
+              print("still full")
+          else:
+              send_notification("TFT PBE", "TestFlightの枠が空いた可能性があります！タップして開く")
+              print("notified")
+          PYEOF
