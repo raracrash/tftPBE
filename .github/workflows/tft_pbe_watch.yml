@@ -1,0 +1,83 @@
+name: TFT PBE watch
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  check_page:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check TestFlight page and notify
+        id: check_step
+        env:
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          import sys
+          import urllib.request
+
+          TESTFLIGHT_URL = "https://testflight.apple.com/join/q79npPHz"
+          FULL_MESSAGE = "This beta is full"
+          NTFY_TOPIC = os.environ["NTFY_TOPIC"]
+
+
+          def fetch_page_text(url):
+              request_obj = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+              with urllib.request.urlopen(request_obj, timeout=30) as response_obj:
+                  return response_obj.read().decode("utf-8", errors="replace")
+
+
+          def send_notification(title_text, message_text):
+              request_obj = urllib.request.Request(
+                  f"https://ntfy.sh/{NTFY_TOPIC}",
+                  data=message_text.encode("utf-8"),
+                  headers={"Title": title_text, "Priority": "urgent", "Click": TESTFLIGHT_URL},
+              )
+              urllib.request.urlopen(request_obj, timeout=30)
+
+
+          def write_output_flag():
+              with open(os.environ["GITHUB_OUTPUT"], "a") as output_file:
+                  output_file.write("notified=true\n")
+
+
+          page_text = fetch_page_text(TESTFLIGHT_URL)
+
+          if "TFT" not in page_text:
+              print("unexpected page, skip")
+              sys.exit(0)
+
+          if FULL_MESSAGE in page_text:
+              print("still full")
+          else:
+              send_notification("TFT PBE", "TestFlightの枠が空いた可能性があります！タップして開く")
+              write_output_flag()
+              print("notified")
+          PYEOF
+
+      - name: Count notifications and stop after 2
+        if: steps.check_step.outputs.notified == 'true' && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          count_value=$(cat counter.txt 2>/dev/null || echo 0)
+          count_value=$((count_value + 1))
+          echo "$count_value" > counter.txt
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git add counter.txt
+          git commit -m "notification count $count_value"
+          git push
+          if [ "$count_value" -ge 2 ]; then
+            gh workflow disable "TFT PBE watch"
+          fi
